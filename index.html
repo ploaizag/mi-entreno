@@ -293,7 +293,7 @@ function planView(){
 }
 
 function logView(){
-  if(!S.logDay){
+  if(S.logDay === null){
     const cards=DAYS.map((d,i)=>`
       <div class="card" style="border-left:4px solid ${d.color};cursor:pointer" data-action="log-select" data-day="${i}">
         <div style="padding:14px 16px">
