@@ -195,6 +195,7 @@ const S = {
   measurements:DB.get('measurements'),
   planOpen:null,
   histOpen:null,
+  editId:null,
   logDay:null,
   logDate:today(),
   logNotes:'',
@@ -310,6 +311,7 @@ function logView(){
   }
 
   const day=DAYS[S.logDay];
+  const editSession=S.editId!==null?S.sessions.find(s=>s.id===S.editId):null;
   const setLabels=`<div class="sgrid" style="margin-bottom:5px">
     <div></div>
     <div style="font-size:10px;color:var(--di);font-family:monospace;text-align:center">PESO (kg)</div>
@@ -317,18 +319,20 @@ function logView(){
   </div>`;
 
   const exBlocks=day.exercises.map(ex=>{
-    const rows=Array(ex.sets).fill(0).map((_,si)=>`
+    const editEx=editSession?editSession.exercises.find(e=>e.name===ex.name):null;
+    const setsData=editEx?editEx.sets:Array(ex.sets).fill(0).map(()=>({weight:'',reps:''}));
+    const rows=setsData.map((set,si)=>`
       <div class="sgrid">
         <div class="snum">${si+1}</div>
-        <input class="sinp" type="number" inputmode="decimal" step="0.5" min="0" placeholder="—" data-ex="${esc(ex.name)}" data-field="weight">
-        <input class="sinp" type="number" inputmode="numeric" min="0" placeholder="—" data-ex="${esc(ex.name)}" data-field="reps">
+        <input class="sinp" type="number" inputmode="decimal" step="0.5" min="0" placeholder="—" value="${esc(set.weight||'')}" data-ex="${esc(ex.name)}" data-field="weight">
+        <input class="sinp" type="number" inputmode="numeric" min="0" placeholder="—" value="${esc(set.reps||'')}" data-ex="${esc(ex.name)}" data-field="reps">
       </div>`).join('');
     return `
       <div class="card">
         <div style="padding:10px 14px;border-bottom:1px solid var(--bord)">
           <div style="font-size:13px;font-weight:600;color:var(--tx);line-height:1.3">${esc(ex.name)}</div>
           <div style="font-size:11px;color:${day.color};font-family:monospace;margin-top:3px">
-            Objetivo: ${ex.sets} × ${esc(ex.reps)}${ex.tempo!=='—'?' · Tempo '+ex.tempo:''}
+            Objetivo: ${ex.sets} × ${esc(ex.reps)} · Descanso ${esc(ex.rest)}${ex.tempo!=='—'?' · Tempo '+ex.tempo:''}
           </div>
         </div>
         <div style="padding:10px 14px" data-ex-block="${esc(ex.name)}">
@@ -339,6 +343,8 @@ function logView(){
       </div>`;
   }).join('');
 
+  const editNotes=editSession?editSession.notes||'':'';
+  const editLabel=S.editId!==null?'Guardar cambios':'Guardar sesión';
   return `
     <div style="display:flex;gap:10px;align-items:center;margin-bottom:14px">
       <button class="btn-s" data-action="log-back">← Volver</button>
@@ -347,7 +353,7 @@ function logView(){
     <div class="card" style="border-left:4px solid ${day.color};margin-bottom:14px">
       <div style="padding:10px 14px">
         <div style="font-size:11px;color:${day.color};font-family:monospace">${esc(day.tag)}</div>
-        <div style="font-size:15px;font-weight:600;color:var(--tx)">${esc(day.label)}</div>
+        <div style="font-size:15px;font-weight:600;color:var(--tx)">${S.editId!==null?'Editando sesión':esc(day.label)}</div>
       </div>
     </div>
     <div class="wu" style="margin-bottom:14px">
@@ -359,8 +365,8 @@ function logView(){
       <div class="blk-lbl" style="color:var(--bl)">❄️ VUELTA A LA CALMA</div>
       <div class="blk-txt">${esc(day.cooldown)}</div>
     </div>
-    <textarea id="log-notes" placeholder="Notas de la sesión (opcional)…" style="height:72px;margin-bottom:12px"></textarea>
-    <button class="btn-p" id="btn-save" data-action="log-save">Guardar sesión</button>`;
+    <textarea id="log-notes" placeholder="Notas de la sesión (opcional)…" style="height:72px;margin-bottom:12px">${esc(editNotes)}</textarea>
+    <button class="btn-p" id="btn-save" data-action="log-save">${editLabel}</button>`;
 }
 
 function histView(){
@@ -397,6 +403,10 @@ function histView(){
             <div class="s-meta">${s.exercises.length} ejercicios</div>
           </div>
           <span class="chevron">▼</span>
+        </div>
+        <div style="padding:6px 12px;border-bottom:1px solid var(--bord);display:flex;gap:8px">
+          <button data-action="sess-edit" data-id="${s.id}" style="flex:1;padding:5px;background:var(--acc-dim);border:1px solid var(--acc-b);color:var(--acc);border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit">✏️ Editar</button>
+          <button data-action="sess-delete" data-id="${s.id}" style="flex:1;padding:5px;background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.3);color:#f87171;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit">🗑 Eliminar</button>
         </div>
         ${detail}
       </div>`;
@@ -522,7 +532,11 @@ document.addEventListener('click',e=>{
     render();return}
 
   if(a==='log-select'){S.logDay=+el.dataset.day;S.logDate=today();render();return}
-  if(a==='log-back'){S.logDay=null;render();return}
+  if(a==='log-back'){
+    const wasEditing=S.editId!==null;
+    S.logDay=null;S.editId=null;
+    if(wasEditing)S.tab='history';
+    render();return}
 
   if(a==='add-set'){
     const name=el.dataset.ex;
@@ -549,13 +563,38 @@ document.addEventListener('click',e=>{
       });
       return{name:ex.name,sets};
     });
-    const session={id:Date.now(),date,dayId:day.id,dayLabel:day.label,notes,exercises};
-    S.sessions=[session,...S.sessions];
-    DB.set('sessions',S.sessions);
-    const btn=document.getElementById('btn-save');
-    if(btn){btn.textContent='✓ Sesión guardada';btn.style.background='rgba(74,222,128,0.2)'}
-    setTimeout(()=>{S.logDay=null;render()},1400);
-    return}
+    if(S.editId!==null){
+      const idx=S.sessions.findIndex(s=>s.id===S.editId);
+      if(idx!==-1)S.sessions[idx]={...S.sessions[idx],date,notes,exercises};
+      S.editId=null;
+      DB.set('sessions',S.sessions);
+      S.logDay=null;S.tab='history';
+    } else {
+      const session={id:Date.now(),date,dayId:day.id,dayLabel:day.label,notes,exercises};
+      S.sessions=[session,...S.sessions];
+      DB.set('sessions',S.sessions);
+      const btn=document.getElementById('btn-save');
+      if(btn){btn.textContent='✓ Sesión guardada';btn.style.background='rgba(74,222,128,0.2)'}
+      setTimeout(()=>{S.logDay=null;render()},1400);return;
+    }
+    render();return}
+
+  if(a==='sess-delete'){
+    const id=+el.dataset.id;
+    if(confirm('¿Eliminar esta sesión? No se puede deshacer.')){
+      S.sessions=S.sessions.filter(s=>s.id!==id);
+      DB.set('sessions',S.sessions);
+      S.histOpen=null;render();
+    }return}
+
+  if(a==='sess-edit'){
+    const id=+el.dataset.id;
+    const session=S.sessions.find(s=>s.id===id);
+    if(!session)return;
+    const dayIdx=DAYS.findIndex(d=>d.id===session.dayId);
+    if(dayIdx===-1)return;
+    S.editId=id;S.logDay=dayIdx;S.logDate=session.date;S.tab='log';
+    render();return}
 
   if(a==='hist-toggle'){
     const i=+el.dataset.idx;
